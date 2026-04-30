@@ -4,19 +4,27 @@
 This project intentionally ships as one large HTML file for restricted
 environments that cannot rely on localhost, a web server, remote URLs, CDNs, or
 file:// subresource loading. The editable source stays split under src/, while
-this script inlines the CSS, application JavaScript, vendored face-api.js, and
-the generated local model bundle into index.html.
+this script inlines the CSS, application JavaScript, vendored face-api UMD
+bundle (which itself ships TensorFlow.js v4 internally), and the
+gzip-compressed local model bundle into index.html.
+
+The model bundle (face detection, landmarks, and ArcFace recognition) is built
+from the unpacked manifests/shards in models/, packed into a single JSON map,
+gzip-compressed, base64-encoded, and decompressed in the browser via the
+WHATWG DecompressionStream API. This shrinks the embedded payload meaningfully
+versus base64-of-uncompressed.
 """
 
 from __future__ import annotations
 
 import argparse
 import base64
+import gzip
 import hashlib
 import json
-from pathlib import Path
 import re
 import sys
+from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,6 +52,13 @@ def read_text(path: Path) -> str:
         raise SystemExit(f"Missing build input: {path.relative_to(ROOT)}") from exc
 
 
+def read_bytes(path: Path) -> bytes:
+    try:
+        return path.read_bytes()
+    except FileNotFoundError as exc:
+        raise SystemExit(f"Missing build input: {path.relative_to(ROOT)}") from exc
+
+
 def inline_css(text: str) -> str:
     if "</style" in text.lower():
         raise SystemExit("Refusing to inline CSS containing a closing </style tag")
@@ -57,13 +72,12 @@ def inline_script(text: str) -> str:
     return safe.rstrip() + "\n"
 
 
-def build_model_bundle() -> str:
+def collect_face_api_assets(entries: dict[str, dict[str, str]]) -> None:
+    """Embed face-api.js detector and landmark assets keyed by filename."""
     models_dir = ROOT / "models"
     manifests = sorted(models_dir.glob("*-weights_manifest.json"))
     if not manifests:
-        raise SystemExit("No model weight manifests found in models/")
-
-    entries: dict[str, dict[str, str]] = {}
+        raise SystemExit("No face-api weight manifests found in models/")
 
     for manifest_path in manifests:
         manifest_text = read_text(manifest_path)
@@ -72,24 +86,77 @@ def build_model_bundle() -> str:
         try:
             manifest = json.loads(manifest_text)
         except json.JSONDecodeError as exc:
-            raise SystemExit(f"Invalid model manifest JSON: {manifest_path.relative_to(ROOT)}") from exc
+            raise SystemExit(
+                f"Invalid model manifest JSON: {manifest_path.relative_to(ROOT)}"
+            ) from exc
 
         for group in manifest:
             for shard_name in group.get("paths", []):
                 shard_path = manifest_path.parent / shard_name
                 if not shard_path.exists():
-                    raise SystemExit(f"Missing model shard: {shard_path.relative_to(ROOT)}")
-
+                    raise SystemExit(
+                        f"Missing model shard: {shard_path.relative_to(ROOT)}"
+                    )
                 entries[shard_path.name] = {
                     "kind": "binary",
                     "base64": base64.b64encode(shard_path.read_bytes()).decode("ascii"),
                 }
 
+
+def collect_arcface_assets(entries: dict[str, dict[str, str]]) -> None:
+    """Embed the converted ArcFace TF.js GraphModel: model.json + shards."""
+    arcface_dir = ROOT / "models" / "arcface"
+    model_json_path = arcface_dir / "model.json"
+    if not model_json_path.exists():
+        raise SystemExit(
+            "Missing ArcFace model.json. Run conversion (see tools/README) "
+            "and place model.json + shards under models/arcface/."
+        )
+
+    model_json_text = read_text(model_json_path)
+    entries[model_json_path.name] = {"kind": "json", "text": model_json_text}
+
+    try:
+        spec = json.loads(model_json_text)
+    except json.JSONDecodeError as exc:
+        raise SystemExit("Invalid ArcFace model.json") from exc
+
+    for group in spec.get("weightsManifest", []):
+        for shard_name in group.get("paths", []):
+            shard_path = arcface_dir / shard_name
+            if not shard_path.exists():
+                raise SystemExit(
+                    f"Missing ArcFace shard: {shard_path.relative_to(ROOT)}"
+                )
+            # Filename collision guard: face-api shards already in entries
+            # share a flat namespace with the ArcFace shards.
+            if shard_path.name in entries:
+                raise SystemExit(
+                    f"Filename collision in embedded bundle: {shard_path.name}"
+                )
+            entries[shard_path.name] = {
+                "kind": "binary",
+                "base64": base64.b64encode(shard_path.read_bytes()).decode("ascii"),
+            }
+
+
+def build_model_bundle() -> str:
+    entries: dict[str, dict[str, str]] = {}
+    collect_face_api_assets(entries)
+    collect_arcface_assets(entries)
+
+    payload = json.dumps(entries, separators=(",", ":")).encode("utf-8")
+    # mtime=0 keeps the gzip header deterministic so --check is reproducible.
+    compressed = gzip.compress(payload, compresslevel=9, mtime=0)
+    b64 = base64.b64encode(compressed).decode("ascii")
+
     return (
-        "/* Generated local model bundle for FaceTrace Offline. Do not edit by hand. */\n"
-        "window.FACETRACE_EMBEDDED_MODELS = "
-        + json.dumps(entries, separators=(",", ":"))
-        + ";\n"
+        "/* Generated local model bundle for FaceTrace Offline. Do not edit by hand.\n"
+        f" * raw json bytes: {len(payload)}\n"
+        f" * gzip bytes:     {len(compressed)}\n"
+        f" * base64 bytes:   {len(b64)}\n"
+        " */\n"
+        f'window.FACETRACE_EMBEDDED_MODELS_GZIP_B64 = "{b64}";\n'
     )
 
 
@@ -99,7 +166,6 @@ def build_html(model_bundle: str) -> str:
     for marker, path in REPLACEMENTS.items():
         if marker not in html:
             raise SystemExit(f"Template marker missing: {marker}")
-
         text = read_text(path)
         replacement = inline_css(text) if path.suffix == ".css" else inline_script(text)
         html = html.replace(marker, replacement, 1)
@@ -109,16 +175,16 @@ def build_html(model_bundle: str) -> str:
         raise SystemExit(f"Template marker missing: {model_marker}")
     html = html.replace(model_marker, inline_script(model_bundle), 1)
 
-    leftover = [marker for marker in (*REPLACEMENTS.keys(), model_marker) if marker in html]
+    leftover = [m for m in (*REPLACEMENTS.keys(), model_marker) if m in html]
     if leftover:
         raise SystemExit(f"Unreplaced template marker(s): {', '.join(leftover)}")
 
     generated_note = (
         "<!--\n"
-        "  Generated by tools/build.py. Edit src/*, vendor/face-api.min.js, or the\n"
-        "  unpacked model manifests/shards in models/, then rebuild. index.html is\n"
-        "  intentionally self-contained for offline file:// execution on restricted\n"
-        "  systems. models/embedded-models.js is generated too.\n"
+        "  Generated by tools/build.py. Edit src/*, vendor/face-api.min.js,\n"
+        "  or the unpacked model assets in models/, then rebuild. index.html\n"
+        "  is intentionally self-contained for offline file:// execution on\n"
+        "  restricted systems. models/embedded-models.js is generated too.\n"
         "-->\n"
     )
 
@@ -139,7 +205,9 @@ def validate_generated_html(html: str) -> None:
     }
     found = [name for name, pattern in disallowed.items() if pattern.search(html)]
     if found:
-        raise SystemExit(f"Generated HTML contains disallowed external-loading tag(s): {', '.join(found)}")
+        raise SystemExit(
+            f"Generated HTML contains disallowed external-loading tag(s): {', '.join(found)}"
+        )
 
 
 def sha256_text(text: str) -> str:
@@ -167,7 +235,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.check:
         existing = output.read_text(encoding="utf-8") if output.exists() else ""
-        existing_model_bundle = MODEL_BUNDLE.read_text(encoding="utf-8") if MODEL_BUNDLE.exists() else ""
+        existing_model_bundle = (
+            MODEL_BUNDLE.read_text(encoding="utf-8") if MODEL_BUNDLE.exists() else ""
+        )
         failed = False
 
         if existing_model_bundle != generated_model_bundle:
@@ -182,12 +252,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"existing sha256 {sha256_text(existing)}", file=sys.stderr)
             failed = True
 
-        if failed:
-            return 1
-
-        print(f"{output.relative_to(ROOT)} is up to date")
-        print(f"{MODEL_BUNDLE.relative_to(ROOT)} is up to date")
-        return 0
+        return 1 if failed else 0
 
     MODEL_BUNDLE.write_text(generated_model_bundle, encoding="utf-8")
     output.write_text(generated, encoding="utf-8")
