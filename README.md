@@ -1,6 +1,24 @@
 # FaceTrace Offline
 
+<p align="center">
+  <a href="docs/screenshots/facetrace-offline-marketing-card.png">
+    <img src="docs/screenshots/facetrace-offline-marketing-card-preview.jpg" alt="FaceTrace Offline marketing card: private, powerful, 100% offline face similarity comparison." width="900">
+  </a>
+</p>
+
 FaceTrace Offline is a standalone browser app for local face similarity comparison. It runs entirely client-side from a self-contained `index.html`; there is no server, upload, telemetry, CDN, cloud API, or remote model download.
+
+## Example Run
+
+<p align="center">
+  <a href="docs/screenshots/facetrace-offline-example-full.png">
+    <img src="docs/screenshots/facetrace-offline-example-preview.jpg" alt="FaceTrace Offline example results showing high similarity scores, a lower sunglasses score, and a masked image with no detected face." width="900">
+  </a>
+</p>
+
+<p align="center">
+  <sub>Example result list from the offline app. High percentages indicate visual similarity; occlusion can lower scores or prevent face detection. Click the image for the full screenshot.</sub>
+</p>
 
 ## Run Offline
 
