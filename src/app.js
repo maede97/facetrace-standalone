@@ -40,6 +40,9 @@
 
   let analysisQueue = Promise.resolve();
   let arcfaceModel = null;
+  let renderResultsScheduled = false;
+  const objectUrls = new Set();
+
   // The bundled face-api UMD ships TensorFlow.js v4 internally and exposes it
   // as faceapi.tf. We use that single engine for face-api detection, ArcFace
   // GraphModel inference, and tensor scope management — no second TF.js
@@ -127,6 +130,34 @@
       throw new Error("Canvas 2D context is unavailable");
     }
     return context;
+  }
+
+  function registerObjectUrl(url) {
+    objectUrls.add(url);
+    return url;
+  }
+
+  function releaseObjectUrl(url) {
+    if (typeof url === "string" && url.startsWith("blob:") && objectUrls.delete(url)) {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  function releaseAnalysisUrls(analysis) {
+    if (!analysis) return;
+    releaseObjectUrl(analysis.thumbnail);
+    if (Array.isArray(analysis.faces)) {
+      for (const face of analysis.faces) {
+        releaseObjectUrl(face && face.crop);
+      }
+    }
+  }
+
+  function releaseAllObjectUrls() {
+    for (const url of objectUrls) {
+      URL.revokeObjectURL(url);
+    }
+    objectUrls.clear();
   }
 
   function isLikelyImage(file) {
@@ -620,6 +651,7 @@
   elements.clearButton.addEventListener("click", () => {
     state.runToken += 1;
     state.processing = false;
+    releaseAllObjectUrls();
     state.reference = null;
     state.referenceFaceIndex = 0;
     state.candidates = [];
@@ -648,6 +680,7 @@
 
     state.runToken += 1;
     const token = state.runToken;
+    releaseAnalysisUrls(state.reference);
     state.reference = {
       fileName: imageFiles[0].name,
       status: "processing",
@@ -663,7 +696,10 @@
       ensureModelsReady();
       await yieldToBrowser();
       const analysis = await analyzeImageFile(imageFiles[0]);
-      if (token !== state.runToken) return;
+      if (token !== state.runToken) {
+        releaseAnalysisUrls(analysis);
+        return;
+      }
       state.reference = analysis;
 
       if (analysis.faces.length > 0) {
@@ -740,7 +776,7 @@
   async function processCandidateQueue() {
     if (state.processing || !state.candidates.length || !hasUsableReference()) {
       updateCandidateMessage();
-      renderResults();
+      scheduleRenderResults();
       return;
     }
 
@@ -753,24 +789,38 @@
     state.processing = true;
     const queue = state.candidates.filter((candidate) => candidate.status === "queued" || candidate.status === "error-read");
     let completed = 0;
+    let cancelled = false;
 
     showProgress(0, Math.max(queue.length, 1), queue.length ? "Processing candidate images..." : "No queued images.");
 
     for (const candidate of queue) {
-      if (token !== state.runToken) break;
+      if (token !== state.runToken) {
+        cancelled = true;
+        break;
+      }
       candidate.status = "processing";
-      renderResults();
+      scheduleRenderResults();
       showProgress(completed, queue.length, `Processing ${candidate.fileName}...`);
 
       try {
         await yieldToBrowser();
         const analysis = await analyzeImageFile(candidate.file);
-        if (token !== state.runToken) break;
+        if (token !== state.runToken) {
+          releaseAnalysisUrls(analysis);
+          candidate.status = "queued";
+          cancelled = true;
+          break;
+        }
         candidate.result = scoreCandidateAnalysis(analysis);
         candidate.status = "done";
         candidate.error = null;
+        candidate.file = null;
       } catch (error) {
-        if (token !== state.runToken) break;
+        if (token !== state.runToken) {
+          candidate.status = "queued";
+          cancelled = true;
+          break;
+        }
         candidate.result = {
           fileName: candidate.fileName,
           thumbnail: "",
@@ -786,23 +836,33 @@
         };
         candidate.status = "done";
         candidate.error = normalizeError(error);
+        candidate.file = null;
       }
 
       completed += 1;
       showProgress(completed, queue.length, `${completed} of ${queue.length} candidate image(s) processed.`);
-      renderResults();
+      scheduleRenderResults();
       await yieldToBrowser();
     }
 
-    if (token === state.runToken) {
-      state.processing = false;
+    state.processing = false;
+    if (token === state.runToken || !state.reference || state.reference.status !== "processing") {
       hideProgress();
-      updateCandidateMessage();
-      renderResults();
+    }
 
-      if (state.candidates.some((candidate) => candidate.status === "queued")) {
-        processCandidateQueue();
+    if (cancelled || token !== state.runToken) {
+      for (const candidate of state.candidates) {
+        if (candidate.status === "processing") {
+          candidate.status = "queued";
+        }
       }
+    }
+
+    updateCandidateMessage();
+    renderResults();
+
+    if (state.candidates.some((candidate) => candidate.status === "queued")) {
+      processCandidateQueue();
     }
   }
 
@@ -815,9 +875,12 @@
   async function analyzeImageFileNow(file) {
     const loaded = await loadImage(file);
     let analysisCanvas = null;
+    let thumbnail = "";
+    const faces = [];
+    let returned = false;
     try {
       analysisCanvas = drawImageToCanvas(loaded.image, MAX_ANALYSIS_SIDE);
-      const thumbnail = canvasToDataUrl(analysisCanvas, THUMBNAIL_SIDE, 0.82);
+      thumbnail = await canvasToObjectUrl(analysisCanvas, THUMBNAIL_SIDE, 0.82);
 
       const detectorOptions = new faceapi.TinyFaceDetectorOptions({
         inputSize: 416,
@@ -838,27 +901,32 @@
         endScope();
       }
 
-      const faces = [];
       for (let index = 0; index < detections.length; index += 1) {
         const detection = detections[index];
         const fivePoints = fivePointFrom68(detection.landmarks);
         if (!fivePoints) continue;
 
         const aligned = alignedFaceCanvas(analysisCanvas, fivePoints);
-        const descriptor = await descriptorWithFlipTta(aligned);
-        const box = detection.detection.box;
-        const blurVariance = laplacianVarianceForCanvas(aligned);
-        aligned.width = 0;
-        aligned.height = 0;
+        let descriptor;
+        let blurVariance;
+        try {
+          descriptor = await descriptorWithFlipTta(aligned);
+          blurVariance = laplacianVarianceForCanvas(aligned);
+        } finally {
+          aligned.width = 0;
+          aligned.height = 0;
+        }
 
+        const box = detection.detection.box;
         const { yawRatio, pitchRatio, rollDegrees } = poseRatiosFromFivePoints(fivePoints);
+        const crop = await cropFaceToObjectUrl(analysisCanvas, box, FACE_CROP_SIDE);
 
         faces.push({
           index,
           descriptor,
           score: detection.detection.score,
           box: { x: box.x, y: box.y, width: box.width, height: box.height },
-          crop: cropFaceToDataUrl(analysisCanvas, box, FACE_CROP_SIDE),
+          crop,
           quality: {
             detectorScore: detection.detection.score,
             yawRatio,
@@ -873,7 +941,7 @@
 
       faces.sort((left, right) => (right.box.width * right.box.height) - (left.box.width * left.box.height));
 
-      return {
+      const analysis = {
         fileName: file.name,
         fileSize: file.size,
         fileType: file.type || "unknown",
@@ -885,7 +953,15 @@
         status: faces.length ? "ok" : "no-face",
         error: faces.length ? null : "No face detected"
       };
+      returned = true;
+      return analysis;
     } finally {
+      if (!returned) {
+        releaseObjectUrl(thumbnail);
+        for (const face of faces) {
+          releaseObjectUrl(face.crop);
+        }
+      }
       loaded.release();
       if (analysisCanvas) {
         analysisCanvas.width = 0;
@@ -948,7 +1024,7 @@
     return canvas;
   }
 
-  function canvasToDataUrl(sourceCanvas, maxSide, quality) {
+  async function canvasToObjectUrl(sourceCanvas, maxSide, quality) {
     const scale = Math.min(1, maxSide / Math.max(sourceCanvas.width, sourceCanvas.height));
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(sourceCanvas.width * scale));
@@ -957,13 +1033,16 @@
     context.imageSmoothingEnabled = true;
     context.imageSmoothingQuality = "high";
     context.drawImage(sourceCanvas, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL("image/jpeg", quality);
-    canvas.width = 0;
-    canvas.height = 0;
-    return dataUrl;
+    try {
+      const blob = await canvasToBlob(canvas, "image/jpeg", quality);
+      return registerObjectUrl(URL.createObjectURL(blob));
+    } finally {
+      canvas.width = 0;
+      canvas.height = 0;
+    }
   }
 
-  function cropFaceToDataUrl(sourceCanvas, box, size) {
+  async function cropFaceToObjectUrl(sourceCanvas, box, size) {
     const centerX = box.x + box.width / 2;
     const centerY = box.y + box.height / 2;
     const square = Math.max(box.width, box.height) * 1.55;
@@ -982,10 +1061,36 @@
     context.imageSmoothingEnabled = true;
     context.imageSmoothingQuality = "high";
     context.drawImage(sourceCanvas, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, size, size);
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.86);
-    canvas.width = 0;
-    canvas.height = 0;
-    return dataUrl;
+    try {
+      const blob = await canvasToBlob(canvas, "image/jpeg", 0.86);
+      return registerObjectUrl(URL.createObjectURL(blob));
+    } finally {
+      canvas.width = 0;
+      canvas.height = 0;
+    }
+  }
+
+  function canvasToBlob(canvas, type, quality) {
+    if (typeof canvas.toBlob === "function") {
+      return new Promise((resolve, reject) => {
+        canvas.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error("Image preview could not be generated"));
+        }, type, quality);
+      });
+    }
+
+    // Very old browsers may lack toBlob. Keep a fallback so previews still
+    // work, but most modern browsers take the asynchronous path above.
+    try {
+      const dataUrl = canvas.toDataURL(type, quality);
+      const [header, payload] = dataUrl.split(",");
+      const mimeMatch = /^data:([^;]+);base64$/i.exec(header || "");
+      const bytes = base64ToUint8Array(payload || "");
+      return Promise.resolve(new Blob([bytes], { type: mimeMatch ? mimeMatch[1] : type }));
+    } catch (error) {
+      return Promise.reject(error);
+    }
   }
 
   function chooseDefaultReferenceFace(faces) {
@@ -1143,6 +1248,20 @@
   }
 
   // ---------- rendering ----------
+
+  function scheduleRenderResults() {
+    if (renderResultsScheduled) return;
+    renderResultsScheduled = true;
+    const callback = () => {
+      renderResultsScheduled = false;
+      renderResults();
+    };
+    if (typeof window.requestAnimationFrame === "function") {
+      window.requestAnimationFrame(callback);
+    } else {
+      window.setTimeout(callback, 16);
+    }
+  }
 
   function renderReference() {
     const reference = state.reference;

@@ -28,7 +28,7 @@
       </div>
       <details>
         <summary>Percentage method</summary>
-        <p>The app compares 128-number face descriptors with Euclidean distance. Similarity is normalized as <code>max(0, min(100, (1 - distance / 1.20) * 100))</code>, so distance 0 is 100%, distance 0.60 is 50%, and distance 1.20 or higher is 0%. Raw distances appear only in technical details.</p>
+        <p>The app aligns each detected face, extracts a 256-number ArcFace descriptor, and compares descriptors with cosine similarity. The percentage uses <code>100 / (1 + exp(-12 * (cosine - 0.32)))</code>, so cosine 0.32 maps to 50%. Raw cosine similarity and Euclidean distance appear only in technical details.</p>
       </details>
     </section>
 

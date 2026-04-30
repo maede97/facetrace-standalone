@@ -23,8 +23,8 @@ import gzip
 import hashlib
 import json
 import re
-import sys
 from pathlib import Path
+import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,13 +48,6 @@ REPLACEMENTS = {
 def read_text(path: Path) -> str:
     try:
         return path.read_text(encoding="utf-8")
-    except FileNotFoundError as exc:
-        raise SystemExit(f"Missing build input: {path.relative_to(ROOT)}") from exc
-
-
-def read_bytes(path: Path) -> bytes:
-    try:
-        return path.read_bytes()
     except FileNotFoundError as exc:
         raise SystemExit(f"Missing build input: {path.relative_to(ROOT)}") from exc
 
@@ -146,8 +139,11 @@ def build_model_bundle() -> str:
     collect_arcface_assets(entries)
 
     payload = json.dumps(entries, separators=(",", ":")).encode("utf-8")
-    # mtime=0 keeps the gzip header deterministic so --check is reproducible.
+    # mtime=0 keeps most of the gzip header deterministic. Some Python/zlib
+    # combinations still stamp platform-specific OS metadata into byte 9, so
+    # normalize that byte to 255 ("unknown") for reproducible builds.
     compressed = gzip.compress(payload, compresslevel=9, mtime=0)
+    compressed = compressed[:9] + b"\xff" + compressed[10:]
     b64 = base64.b64encode(compressed).decode("ascii")
 
     return (
