@@ -8,6 +8,12 @@ on:
       - "v*"
   pull_request:
   workflow_dispatch:
+    inputs:
+      deploy_pages:
+        description: "Deploy GitHub Pages. Requires Settings > Pages > Source: GitHub Actions."
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -58,7 +64,7 @@ jobs:
 
   pages:
     name: Deploy GitHub Pages
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy_pages == true
     needs: build
     runs-on: ubuntu-latest
     permissions:

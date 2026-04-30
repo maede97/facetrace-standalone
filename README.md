@@ -54,8 +54,10 @@ The build script intentionally rejects generated HTML that reintroduces external
 
 - Pull requests and pushes verify `index.html` and `models/embedded-models.js` with `python3 tools/build.py --check`.
 - The workflow runs JavaScript syntax checks on the maintained source and generated model bundle.
-- Pushes to `main` deploy the generated `index.html` and this README as the GitHub Pages site.
+- Manual workflow runs can deploy the generated `index.html` and this README as the GitHub Pages site.
 - Pushing a tag named `v*` creates a GitHub Release with `index.html` and `README.md` attached.
+
+Pages deployment is deliberately manual so ordinary pushes do not accidentally publish an unfinished private build. To publish it, first open the GitHub repository settings and choose `Settings > Pages > Build and deployment > Source > GitHub Actions`, then run the `Build, Pages, Release` workflow manually with `deploy_pages` enabled. The workflow does not use `actions/configure-pages` automatic enablement because that requires a token other than the default `GITHUB_TOKEN`; keeping it manual avoids storing a Pages administration token in the repository.
 
 The Pages deployment serves the same self-contained HTML artifact. The app still performs all face processing in the browser and does not require a server at runtime. The top-corner GitHub sponsor ribbon is a plain link only; it does not load external scripts, images, fonts, or tracking pixels.
 
