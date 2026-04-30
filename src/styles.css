@@ -62,21 +62,23 @@ summary:focus-visible,
 
 .github-ribbon {
   position: fixed;
-  top: 18px;
-  right: 22px;
+  top: 36px;
+  right: -66px;
   z-index: 30;
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  justify-content: center;
   gap: 7px;
-  min-height: 38px;
+  width: 246px;
+  min-height: 42px;
+  transform: rotate(45deg);
   border: 1px solid #f9a8d4;
-  border-radius: 999px;
-  padding: 8px 13px;
-  color: #9d174d;
-  background: #fce7f3;
-  box-shadow: 0 14px 34px rgba(157, 23, 77, 0.18);
-  font-size: 0.86rem;
+  color: #831843;
+  background: linear-gradient(135deg, #fce7f3 0%, #fbcfe8 52%, #f9a8d4 100%);
+  box-shadow: 0 14px 34px rgba(157, 23, 77, 0.24);
+  font-size: 0.82rem;
   font-weight: 900;
+  letter-spacing: 0;
   line-height: 1.1;
   text-align: center;
   text-decoration: none;
@@ -92,15 +94,15 @@ summary:focus-visible,
 
 .github-ribbon:hover {
   border-color: #f472b6;
-  background: #fbcfe8;
+  background: linear-gradient(135deg, #fbcfe8 0%, #f9a8d4 52%, #f472b6 100%);
   box-shadow: 0 16px 38px rgba(157, 23, 77, 0.24);
-  transform: translateY(-1px);
+  transform: rotate(45deg) translateY(-1px);
 }
 
 .app-shell {
   width: min(1440px, 100%);
   margin: 0 auto;
-  padding: 74px 22px 22px;
+  padding: 92px 22px 22px;
 }
 
 .app-header {
@@ -775,15 +777,16 @@ footer {
 
 @media (max-width: 640px) {
   .github-ribbon {
-    top: auto;
-    right: 12px;
-    bottom: 12px;
-    min-height: 40px;
-    padding: 9px 12px;
+    top: 28px;
+    right: -70px;
+    bottom: auto;
+    width: 230px;
+    min-height: 38px;
+    font-size: 0.76rem;
   }
 
   .app-shell {
-    padding: 14px 14px 68px;
+    padding: 92px 14px 14px;
   }
 
   .notice {
