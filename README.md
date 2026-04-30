@@ -48,6 +48,17 @@ python3 tools/build.py --check
 
 The build script intentionally rejects generated HTML that reintroduces external-loading tags such as `<script src>`, `<link>`, or `<iframe>`.
 
+## GitHub Automation
+
+`.github/workflows/build-pages-release.yml` keeps the unusual offline build honest in CI:
+
+- Pull requests and pushes verify `index.html` and `models/embedded-models.js` with `python3 tools/build.py --check`.
+- The workflow runs JavaScript syntax checks on the maintained source and generated model bundle.
+- Pushes to `main` deploy the generated `index.html` and this README as the GitHub Pages site.
+- Pushing a tag named `v*` creates a GitHub Release with `index.html` and `README.md` attached.
+
+The Pages deployment serves the same self-contained HTML artifact. The app still performs all face processing in the browser and does not require a server at runtime. The top-corner GitHub sponsor ribbon is a plain link only; it does not load external scripts, images, fonts, or tracking pixels.
+
 ## Why This Build Is Unusual
 
 The target environment is restricted: it may allow opening one local HTML file but reject `localhost`, local servers, remote URLs, CDNs, and even sibling `file://` script/model loads because file URLs can be treated as unique security origins. A normal web build that emits separate JavaScript chunks or model files is therefore less reliable for this deployment.

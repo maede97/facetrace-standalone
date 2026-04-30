@@ -68,15 +68,39 @@ button:focus-visible,
 select:focus-visible,
 summary:focus-visible,
 .dropzone:focus-visible,
-.face-choice:focus-visible {
+.face-choice:focus-visible,
+.github-ribbon:focus-visible {
   outline: 3px solid rgba(37, 99, 235, 0.35);
   outline-offset: 2px;
+}
+
+.github-ribbon {
+  position: fixed;
+  top: 18px;
+  right: -48px;
+  z-index: 30;
+  width: 190px;
+  transform: rotate(45deg);
+  border: 1px solid rgba(255, 255, 255, 0.36);
+  padding: 8px 0;
+  color: #ffffff;
+  background: #111827;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.24);
+  font-size: 0.78rem;
+  font-weight: 900;
+  line-height: 1.1;
+  text-align: center;
+  text-decoration: none;
+}
+
+.github-ribbon:hover {
+  background: var(--accent-strong);
 }
 
 .app-shell {
   width: min(1440px, 100%);
   margin: 0 auto;
-  padding: 22px;
+  padding: 54px 22px 22px;
 }
 
 .app-header {
@@ -750,8 +774,18 @@ footer {
 }
 
 @media (max-width: 640px) {
+  .github-ribbon {
+    top: auto;
+    right: 12px;
+    bottom: 12px;
+    width: auto;
+    transform: none;
+    border-radius: var(--radius);
+    padding: 9px 11px;
+  }
+
   .app-shell {
-    padding: 14px;
+    padding: 14px 14px 66px;
   }
 
   .notice {
@@ -797,6 +831,7 @@ footer {
   </style>
 </head>
 <body>
+  <a class="github-ribbon" href="https://github.com/sponsors/pascal-gujer" target="_blank" rel="noopener noreferrer" aria-label="Sponsor FaceTrace on GitHub">Sponsor on GitHub</a>
   <div class="app-shell">
     <header class="app-header">
       <div class="brand">
