@@ -138,6 +138,7 @@
   "error.image_unreadable_help": "L'image n'a pas pu être lue. Sélectionnez un fichier image lisible par le navigateur.",
   "error.preview_generation": "L'aperçu de l'image n'a pas pu être généré",
   "error.no_face_detected": "Aucun visage détecté",
+  "error.unexpected": "Erreur inattendue : {message}",
 
   "summary.counts": "{done} sur {total} traités, {scored} notés, {errors} en erreur.",
 

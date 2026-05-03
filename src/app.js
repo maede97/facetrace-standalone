@@ -832,7 +832,8 @@
         status: "error",
         faces: [],
         thumbnail: "",
-        errorKey: normalizeErrorKey(error)
+        errorKey: normalizeErrorKey(error),
+        errorVars: normalizeErrorVars(error)
       };
     } finally {
       if (token === state.runToken) {
@@ -942,6 +943,8 @@
           cancelled = true;
           break;
         }
+        const errorKey = normalizeErrorKey(error);
+        const errorVars = normalizeErrorVars(error);
         candidate.result = {
           fileName: candidate.fileName,
           thumbnail: "",
@@ -951,12 +954,15 @@
           comparisons: [],
           best: null,
           statusKind: "error",
-          statusKey: normalizeErrorKey(error),
+          statusKey: errorKey,
+          statusVars: errorVars,
           faceCount: 0,
-          errorKey: normalizeErrorKey(error)
+          errorKey,
+          errorVars
         };
         candidate.status = "done";
-        candidate.errorKey = normalizeErrorKey(error);
+        candidate.errorKey = errorKey;
+        candidate.errorVars = errorVars;
         candidate.file = null;
       }
 
@@ -1294,7 +1300,9 @@
       best: null,
       statusKind: "error",
       statusKey: "",
-      errorKey: analysis.errorKey || null
+      statusVars: {},
+      errorKey: analysis.errorKey || null,
+      errorVars: analysis.errorVars || {}
     };
 
     if (!referenceFace) {
@@ -1351,13 +1359,19 @@
     if (error.i18nKey) return error.i18nKey;
     const message = error.message || String(error);
     if (state.locales.en && state.locales.en[message]) return message;
-    if (/model not loaded/i.test(message)) return "error.model_not_loaded";
     if (/could not be read|decode|image/i.test(message)) return "error.image_unreadable";
-    return "error.image_unreadable";
+    return "error.unexpected";
+  }
+
+  function normalizeErrorVars(error) {
+    if (!error) return {};
+    if (error.i18nVars) return error.i18nVars;
+    const message = error.message || String(error);
+    return message ? { message } : {};
   }
 
   function normalizeError(error) {
-    return t(normalizeErrorKey(error), error && error.i18nVars ? error.i18nVars : {});
+    return t(normalizeErrorKey(error), normalizeErrorVars(error));
   }
 
   // ---------- progress UI ----------
@@ -1420,7 +1434,7 @@
 
     if (reference.errorKey || !reference.faces.length) {
       elements.referenceMessage.className = "message error";
-      elements.referenceMessage.textContent = t(reference.errorKey || "error.no_face_detected");
+      elements.referenceMessage.textContent = t(reference.errorKey || "error.no_face_detected", reference.errorVars || {});
       return;
     }
 
@@ -1602,7 +1616,7 @@
         );
       }
     } else if (result.errorKey) {
-      cells.push([t("detail.error"), t(result.errorKey)]);
+      cells.push([t("detail.error"), t(result.errorKey, result.errorVars || {})]);
     }
 
     const faceList = result.comparisons && result.comparisons.length
@@ -1701,7 +1715,7 @@
         quality ? formatNumber(quality.rollDegrees, 2) : "",
         quality ? formatNumber(quality.blurVariance, 1) : "",
         best && best.qualityIssues ? best.qualityIssues.map((key) => t(key)).join("; ") : "",
-        result && result.errorKey ? t(result.errorKey) : ""
+        result && result.errorKey ? t(result.errorKey, result.errorVars || {}) : ""
       ]);
     }
 

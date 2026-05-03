@@ -138,6 +138,7 @@
   "error.image_unreadable_help": "Image could not be read. Select a browser-readable image file.",
   "error.preview_generation": "Image preview could not be generated",
   "error.no_face_detected": "No face detected",
+  "error.unexpected": "Unexpected error: {message}",
 
   "summary.counts": "{done} of {total} processed, {scored} scored, {errors} with errors.",
 
